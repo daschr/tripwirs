@@ -1,3 +1,7 @@
+mod tripwirs;
+
+use tripwirs::*;
+
 use std::env;
 use std::path::{Path, PathBuf};
 
