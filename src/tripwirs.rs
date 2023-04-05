@@ -1,8 +1,11 @@
+use core::hash::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_set::HashSet, HashMap};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
+use std::path::{Path, PathBuf};
+use xxhash_rust::xxh3::Xxh3;
 
 enum ActionType {
     Scan,
@@ -65,10 +68,72 @@ pub fn get_config(infile: &str, passphrase: &str) -> std::io::Result<Config> {
     Ok(bincode::deserialize(&s_config).expect("could not deserialize config"))
 }
 
-fn scan_path(config: &Config, path: &str) -> u64 {}
+fn get_filehash(file: &str) -> std::io::Result<u64> {
+    let mut fd = File::open(file)?;
+    let mut buf = [0u8; 1024];
+    let mut hasher = Xxh3::new();
+
+    loop {
+        let read_bytes = fd.read(&mut buf)?;
+        if read_bytes == 0 {
+            break;
+        }
+
+        hasher.write(&buf[0..read_bytes]);
+    }
+
+    let hash = hasher.finish();
+
+    Ok(hash)
+}
+
+enum NodeType {
+    F(u64),
+    D,
+}
+
+fn scan_path(
+    config: &Config,
+    root_path: &str,
+    db: &mut HashMap<&str, NodeType>,
+) -> std::io::Result<()> {
+    let mut pathstack: Vec<PathBuf> = Vec::new();
+    pathstack.push(PathBuf::from(root_path));
+
+    while pathstack.len() != 0 {
+        let e = pathstack.pop().unwrap();
+        let path: &Path = e.as_path();
+
+        if path.is_file() {
+            let p_str: &str = &e.to_str().unwrap();
+            db.insert(p_str, NodeType::F(get_filehash(p_str)?));
+            continue;
+        }
+
+        let it = match path.read_dir() {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let mut n_elems = 0;
+
+        for i in it {
+            n_elems += 1;
+            if let Ok(e) = i {
+                pathstack.push(e.path());
+            }
+        }
+
+        if n_elems == 0 {
+            db.insert(&e.to_str().unwrap(), NodeType::D);
+            println!("[dir] {:?}", &e);
+        }
+    }
+
+    Ok(())
+}
 
 pub fn gen_db(config: &Config, outfile: &str) -> std::io::Result<()> {
-    let mut db: HashMap<&str, u64> = HashMap::new();
+    let mut db: HashMap<&str, NodeType> = HashMap::new();
 
     for root_path in &config.scans {}
 
