@@ -1,9 +1,7 @@
 use core::hash::Hasher;
-use serde::{Deserialize, Serialize};
 use std::collections::{hash_set::HashSet, HashMap};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::Path;
 use std::path::{Path, PathBuf};
 use xxhash_rust::xxh3::Xxh3;
 
@@ -12,7 +10,7 @@ enum ActionType {
     Ignore,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(bincode::Encode, bincode::Decode)]
 pub struct Config {
     scans: Vec<String>,
     ignores: HashSet<String>,
@@ -36,27 +34,29 @@ pub fn gen_config(infile: &str, outfile: &str, passphrase: &str) -> std::io::Res
 
     while fd.read_line(&mut line)? != 0 {
         match line.as_str() {
-            "[SCAN]" | "[scan]" => {
+            "[SCAN]\n" | "[scan]\n" => {
                 current_type = ActionType::Scan;
             }
-            "[IGNORE]" | "[ignore]" => {
+            "[IGNORE]\n" | "[ignore]\n" => {
                 current_type = ActionType::Ignore;
             }
             _ => match &current_type {
                 ActionType::Scan => {
-                    config.scans.push(line.clone());
+                    config.scans.push(String::from(line.trim_end_matches("\n")));
                 }
                 ActionType::Ignore => {
-                    config.ignores.insert(line.clone());
+                    config
+                        .ignores
+                        .insert(String::from(line.trim_end_matches("\n")));
                 }
             },
         }
         line.clear();
     }
 
-    let s_config: Vec<u8> = bincode::serialize(&config).expect("failed to serialize config");
-
-    File::create(outfile)?.write_all(&s_config)?;
+    let mut fd = File::create(outfile)?;
+    bincode::encode_into_std_write(config, &mut fd, bincode::config::standard())
+        .expect("failed to encode config");
 
     Ok(())
 }
@@ -64,8 +64,11 @@ pub fn gen_config(infile: &str, outfile: &str, passphrase: &str) -> std::io::Res
 pub fn get_config(infile: &str, passphrase: &str) -> std::io::Result<Config> {
     let mut s_config: Vec<u8> = Vec::new();
 
-    File::open(infile)?.read_to_end(&mut s_config)?;
-    Ok(bincode::deserialize(&s_config).expect("could not deserialize config"))
+    let mut fd = File::open(infile)?;
+    Ok(
+        bincode::decode_from_std_read(&mut fd, bincode::config::standard())
+            .expect("could not decode config"),
+    )
 }
 
 fn get_filehash(file: &str) -> std::io::Result<u64> {
@@ -87,6 +90,7 @@ fn get_filehash(file: &str) -> std::io::Result<u64> {
     Ok(hash)
 }
 
+#[derive(bincode::Encode, bincode::Decode)]
 enum NodeType {
     F(u64),
     D,
@@ -95,7 +99,7 @@ enum NodeType {
 fn scan_path(
     config: &Config,
     root_path: &str,
-    db: &mut HashMap<&str, NodeType>,
+    db: &mut HashMap<String, NodeType>,
 ) -> std::io::Result<()> {
     let mut pathstack: Vec<PathBuf> = Vec::new();
     pathstack.push(PathBuf::from(root_path));
@@ -103,10 +107,15 @@ fn scan_path(
     while pathstack.len() != 0 {
         let e = pathstack.pop().unwrap();
         let path: &Path = e.as_path();
+        let e_str: &str = &e.to_str().unwrap();
+
+        if config.ignores.contains(e_str) {
+            println!("Skipping \"{}\"", e_str);
+            continue;
+        }
 
         if path.is_file() {
-            let p_str: &str = &e.to_str().unwrap();
-            db.insert(p_str, NodeType::F(get_filehash(p_str)?));
+            db.insert(String::from(e_str), NodeType::F(get_filehash(e_str)?));
             continue;
         }
 
@@ -124,7 +133,7 @@ fn scan_path(
         }
 
         if n_elems == 0 {
-            db.insert(&e.to_str().unwrap(), NodeType::D);
+            db.insert(String::from(e_str), NodeType::D);
             println!("[dir] {:?}", &e);
         }
     }
@@ -133,9 +142,16 @@ fn scan_path(
 }
 
 pub fn gen_db(config: &Config, outfile: &str) -> std::io::Result<()> {
-    let mut db: HashMap<&str, NodeType> = HashMap::new();
+    let mut db: HashMap<String, NodeType> = HashMap::new();
 
-    for root_path in &config.scans {}
+    for root_path in &config.scans {
+        scan_path(config, root_path, &mut db)?;
+    }
 
+    let mut fd = File::create(outfile)?;
+    bincode::encode_into_std_write(db, &mut fd, bincode::config::standard())
+        .expect("could not encode db");
     Ok(())
 }
+
+pub fn compare_db(config: &Config, dbfile: &str) -> std::io::Result<()> {}
