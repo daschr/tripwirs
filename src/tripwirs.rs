@@ -96,6 +96,7 @@ enum NodeType {
     D,
 }
 
+#[inline]
 fn scan_path(
     config: &Config,
     root_path: &str,
@@ -154,4 +155,77 @@ pub fn gen_db(config: &Config, outfile: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-pub fn compare_db(config: &Config, dbfile: &str) -> std::io::Result<()> {}
+#[inline]
+fn compare_path(
+    config: &Config,
+    root_path: &str,
+    db: &HashMap<String, NodeType>,
+) -> std::io::Result<()> {
+    let mut pathstack: Vec<PathBuf> = Vec::new();
+    pathstack.push(PathBuf::from(root_path));
+
+    while pathstack.len() != 0 {
+        let e = pathstack.pop().unwrap();
+        let path: &Path = e.as_path();
+        let e_str: &str = &e.to_str().unwrap();
+
+        if config.ignores.contains(e_str) {
+            println!("Skipping \"{}\"", e_str);
+            continue;
+        }
+
+        if path.is_file() {
+            match db.get(e_str) {
+                Some(NodeType::F(old_hash)) => {
+                    let new_hash = get_filehash(e_str)?;
+                    if *old_hash != new_hash {
+                        println!(
+                            "[{}] HASH CHANGED (old: {}|new: {})",
+                            e_str, old_hash, new_hash
+                        )
+                    }
+                }
+                Some(NodeType::D) => {
+                    println!("[{}] FILE WAS PREVIOUSLY A DIRECTORY", e_str);
+                }
+                None => println!("[{}] NEW FILE", e_str),
+            }
+            continue;
+        }
+
+        let it = match path.read_dir() {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let mut n_elems = 0;
+
+        for i in it {
+            n_elems += 1;
+            if let Ok(e) = i {
+                pathstack.push(e.path());
+            }
+        }
+
+        if n_elems == 0 {
+            match db.get(e_str) {
+                Some(NodeType::F(_)) => println!("[{}] DIRECTORY IS NOW A FILE", e_str),
+                Some(NodeType::D) => (),
+                None => println!("[{}] NEW DIRECTORY", e_str),
+            }
+        }
+    }
+
+    Ok(())
+}
+pub fn compare_db(config: &Config, dbfile: &str) -> std::io::Result<()> {
+    let mut fd = File::open(dbfile)?;
+    let db: HashMap<String, NodeType> =
+        bincode::decode_from_std_read(&mut fd, bincode::config::standard())
+            .expect("could not decode db");
+
+    for root_path in &config.scans {
+        compare_path(config, root_path, &db)?;
+    }
+
+    Ok(())
+}
