@@ -180,7 +180,7 @@ fn compare_path(
                     let new_hash = get_filehash(e_str)?;
                     if old_hash != new_hash {
                         println!(
-                            "[{}] HASH CHANGED (old: {}|new: {})",
+                            "[{}] HASH CHANGED (old: 0x{:016x}|new: 0x{:016x})",
                             e_str, old_hash, new_hash
                         )
                     }
@@ -229,7 +229,7 @@ pub fn compare_db(config: &Config, dbfile: &str) -> std::io::Result<()> {
 
     for (k, v) in db.iter() {
         match v {
-            NodeType::F(hash) => println!("[{k}] FILE WITH HASH {hash} IS REMOVED"),
+            NodeType::F(hash) => println!("[{k}] FILE WITH HASH 0x{hash:016x} IS REMOVED"),
             NodeType::D => println!("[{k}] DIRECTORY IS REMOED"),
         }
     }
