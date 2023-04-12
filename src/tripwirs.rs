@@ -1,7 +1,7 @@
 use core::hash::Hasher;
 use std::collections::{hash_set::HashSet, HashMap};
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use xxhash_rust::xxh3::Xxh3;
 
@@ -159,7 +159,7 @@ pub fn gen_db(config: &Config, outfile: &str) -> std::io::Result<()> {
 fn compare_path(
     config: &Config,
     root_path: &str,
-    db: &HashMap<String, NodeType>,
+    db: &mut HashMap<String, NodeType>,
 ) -> std::io::Result<()> {
     let mut pathstack: Vec<PathBuf> = Vec::new();
     pathstack.push(PathBuf::from(root_path));
@@ -175,10 +175,10 @@ fn compare_path(
         }
 
         if path.is_file() {
-            match db.get(e_str) {
+            match db.remove(e_str) {
                 Some(NodeType::F(old_hash)) => {
                     let new_hash = get_filehash(e_str)?;
-                    if *old_hash != new_hash {
+                    if old_hash != new_hash {
                         println!(
                             "[{}] HASH CHANGED (old: {}|new: {})",
                             e_str, old_hash, new_hash
@@ -207,7 +207,7 @@ fn compare_path(
         }
 
         if n_elems == 0 {
-            match db.get(e_str) {
+            match db.remove(e_str) {
                 Some(NodeType::F(_)) => println!("[{}] DIRECTORY IS NOW A FILE", e_str),
                 Some(NodeType::D) => (),
                 None => println!("[{}] NEW DIRECTORY", e_str),
@@ -219,12 +219,19 @@ fn compare_path(
 }
 pub fn compare_db(config: &Config, dbfile: &str) -> std::io::Result<()> {
     let mut fd = File::open(dbfile)?;
-    let db: HashMap<String, NodeType> =
+    let mut db: HashMap<String, NodeType> =
         bincode::decode_from_std_read(&mut fd, bincode::config::standard())
             .expect("could not decode db");
 
     for root_path in &config.scans {
-        compare_path(config, root_path, &db)?;
+        compare_path(config, root_path, &mut db)?;
+    }
+
+    for (k, v) in db.iter() {
+        match v {
+            NodeType::F(hash) => println!("[{k}] FILE WITH HASH {hash} IS REMOVED"),
+            NodeType::D => println!("[{k}] DIRECTORY IS REMOED"),
+        }
     }
 
     Ok(())
