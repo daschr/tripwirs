@@ -4,6 +4,8 @@ use tripwirs::*;
 
 use std::env;
 
+use rpassword::prompt_password;
+
 #[inline]
 fn print_help(progname: &str) {
     eprintln!("Usage: {} [command] args...]", progname);
@@ -15,6 +17,15 @@ fn print_help(progname: &str) {
     );
 }
 
+#[inline]
+fn get_passphrase() -> String {
+    if let Ok(passphrase) = prompt_password("Passphrase: ") {
+        return passphrase;
+    }
+
+    std::process::exit(1);
+}
+
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -24,15 +35,17 @@ fn main() -> std::io::Result<()> {
 
     match args[1].as_str() {
         "create_config" => {
-            gen_config(&args[2], &args[3], "test")?;
+            gen_config(&args[2], &args[3], &get_passphrase())?;
         }
         "generate_db" => {
-            let conf: Config = get_config(&args[2], "test")?;
-            gen_db(&conf, &args[3])?;
+            let p = get_passphrase();
+            let conf: Config = get_config(&args[2], &p)?;
+            gen_db(&conf, &args[3], &p)?;
         }
         "compare_db" => {
-            let conf: Config = get_config(&args[2], "test")?;
-            compare_db(&conf, &args[3])?;
+            let p = get_passphrase();
+            let conf: Config = get_config(&args[2], &p)?;
+            compare_db(&conf, &args[3], &p)?;
         }
         _ => {
             print_help(&args[0]);
