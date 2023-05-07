@@ -4,7 +4,7 @@ use tripwirs::*;
 
 use std::env;
 
-use rpassword::prompt_password;
+use std::io;
 
 #[inline]
 fn print_help(progname: &str) {
@@ -18,11 +18,20 @@ fn print_help(progname: &str) {
 
 #[inline]
 fn get_passphrase() -> String {
-    if let Ok(passphrase) = prompt_password("Passphrase: ") {
-        return passphrase;
-    }
+    let mut passphrase = String::new();
 
-    std::process::exit(1);
+    match io::stdin().read_line(&mut passphrase) {
+        Ok(_) => {
+            match passphrase.pop() {
+                Some('\n') => (),
+                Some(c) => passphrase.push(c),
+                None => (),
+            }
+
+            passphrase
+        }
+        Err(_) => std::process::exit(1),
+    }
 }
 
 fn main() -> std::io::Result<()> {
