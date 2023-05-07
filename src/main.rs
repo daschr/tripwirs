@@ -12,8 +12,7 @@ fn print_help(progname: &str) {
     eprintln!(
         r"    create_config [plain config input path] [config output path]
     generate_db [config input path] [db output path]
-    compare_db [config input path] [db]
-    "
+    compare_db [config input path] [db]"
     );
 }
 

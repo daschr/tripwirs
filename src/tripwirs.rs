@@ -137,7 +137,7 @@ pub fn gen_config(infile: &str, outfile: &str, passphrase: &str) -> std::io::Res
     let mut current_type: ActionType = ActionType::Scan;
 
     while fd.read_line(&mut line)? != 0 {
-        if line.trim_start().starts_with("#") {
+        if line.trim_start().starts_with("#") || line.trim().len() == 0 {
             line.clear();
             continue;
         }
