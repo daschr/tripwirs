@@ -55,6 +55,10 @@ fn main() -> std::io::Result<()> {
             let conf: Config = get_config(&args[2], &p)?;
             compare_db(&conf, &args[3], &p)?;
         }
+        "show_db" => {
+            let p = get_passphrase();
+            print_db(&args[2], &p)?;
+        }
         _ => {
             print_help(&args[0]);
             std::process::exit(1);

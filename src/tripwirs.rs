@@ -204,13 +204,14 @@ fn scan_path(
     root_path: &str,
     db: &mut HashMap<String, NodeType>,
 ) -> std::io::Result<()> {
+    println!("root_path: {root_path}");
     let mut pathstack: Vec<PathBuf> = Vec::new();
     pathstack.push(PathBuf::from(root_path));
 
     while pathstack.len() != 0 {
         let e = pathstack.pop().unwrap();
         let path: &Path = e.as_path();
-        let e_str: &str = &e.to_str().unwrap();
+        let e_str: &str = e.to_str().unwrap();
 
         if config.ignores.contains(e_str) {
             println!("Skipping \"{}\"", e_str);
@@ -218,7 +219,12 @@ fn scan_path(
         }
 
         if path.is_file() {
-            db.insert(String::from(e_str), NodeType::F(get_filehash(e_str)?));
+            println!("[file] {}", e_str);
+            if let Ok(hash) = get_filehash(e_str) {
+                db.insert(String::from(e_str), NodeType::F(hash));
+            } else {
+                println!("exeption on: \"{e_str}\"");
+            }
             continue;
         }
 
@@ -268,7 +274,7 @@ fn compare_path(
     while pathstack.len() != 0 {
         let e = pathstack.pop().unwrap();
         let path: &Path = e.as_path();
-        let e_str: &str = &e.to_str().unwrap();
+        let e_str: &str = e.to_str().unwrap();
 
         if config.ignores.contains(e_str) {
             println!("Skipping \"{}\"", e_str);
@@ -318,6 +324,7 @@ fn compare_path(
 
     Ok(())
 }
+
 pub fn compare_db(config: &Config, dbfile: &str, passphrase: &str) -> std::io::Result<()> {
     let mut db: HashMap<String, NodeType> = read_decrypted(dbfile, passphrase)?;
 
@@ -332,5 +339,14 @@ pub fn compare_db(config: &Config, dbfile: &str, passphrase: &str) -> std::io::R
         }
     }
 
+    Ok(())
+}
+
+pub fn print_db(dbfile: &str, passphrase: &str) -> std::io::Result<()> {
+    let db: HashMap<String, NodeType> = read_decrypted(dbfile, passphrase)?;
+
+    for (path, _) in db.iter() {
+        println!("[{path}]");
+    }
     Ok(())
 }
