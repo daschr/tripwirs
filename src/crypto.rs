@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::io::{Read, Write};
-use std::str::from_utf8;
 
 use ring::aead::{
     Aad, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, AES_256_GCM,
@@ -62,34 +61,64 @@ fn get_aes_256_compatible_passphrase(passphrase: &str) -> Vec<u8> {
     s
 }
 
+#[derive(Debug)]
+pub enum CryptoError {
+    WrongPassphrase,
+    CouldNotCreateKey,
+    CouldNotEncrypt,
+    EncodeError(bincode::error::EncodeError),
+    DecodeError(bincode::error::DecodeError),
+    IoError(std::io::Error),
+}
+
+impl From<std::io::Error> for CryptoError {
+    fn from(e: std::io::Error) -> Self {
+        Self::IoError(e)
+    }
+}
+
+impl From<bincode::error::EncodeError> for CryptoError {
+    fn from(e: bincode::error::EncodeError) -> Self {
+        Self::EncodeError(e)
+    }
+}
+
+impl From<bincode::error::DecodeError> for CryptoError {
+    fn from(e: bincode::error::DecodeError) -> Self {
+        Self::DecodeError(e)
+    }
+}
+
 pub fn save_encrypted<T: bincode::Encode>(
     obj: T,
     outfile: &str,
     passphrase: &str,
-) -> std::io::Result<()> {
-    let mut data =
-        bincode::encode_to_vec(obj, bincode::config::standard()).expect("failed to encode config");
+) -> Result<(), CryptoError> {
+    let mut data = bincode::encode_to_vec(obj, bincode::config::standard())?;
 
     let comp_passphrase = get_aes_256_compatible_passphrase(passphrase);
 
     let seq = FixedNonceSequence::new();
-    let unbound_key =
-        UnboundKey::new(&AES_256_GCM, &comp_passphrase).expect("Could not create unbound key");
+    let unbound_key = UnboundKey::new(&AES_256_GCM, &comp_passphrase)
+        .map_err(|_| CryptoError::CouldNotCreateKey)?;
     let mut sealing_key = SealingKey::new(unbound_key, seq);
 
     sealing_key
         .seal_in_place_append_tag(Aad::empty(), &mut data)
-        .expect("Could not encrypt config");
+        .map_err(|_| CryptoError::CouldNotEncrypt)?;
 
     File::create(outfile)?.write_all(&data)?;
     Ok(())
 }
 
-pub fn read_decrypted<T: bincode::Decode>(infile: &str, passphrase: &str) -> std::io::Result<T> {
+pub fn read_decrypted<T: bincode::Decode>(
+    infile: &str,
+    passphrase: &str,
+) -> Result<T, CryptoError> {
     let comp_passphrase = get_aes_256_compatible_passphrase(passphrase);
     let seq = FixedNonceSequence::new();
-    let unbound_key =
-        UnboundKey::new(&AES_256_GCM, &comp_passphrase).expect("Could not create key");
+    let unbound_key = UnboundKey::new(&AES_256_GCM, &comp_passphrase)
+        .map_err(|_| CryptoError::CouldNotCreateKey)?;
     let mut opening_key = OpeningKey::new(unbound_key, seq);
 
     let mut data: Vec<u8> = Vec::new();
@@ -98,11 +127,7 @@ pub fn read_decrypted<T: bincode::Decode>(infile: &str, passphrase: &str) -> std
 
     opening_key
         .open_in_place(Aad::empty(), &mut data)
-        .expect("Could not decrypt data");
+        .map_err(|_| CryptoError::WrongPassphrase)?;
 
-    Ok(
-        bincode::decode_from_slice(&data, bincode::config::standard())
-            .expect("could not decode decrypted data")
-            .0,
-    )
+    Ok(bincode::decode_from_slice(&data, bincode::config::standard())?.0)
 }

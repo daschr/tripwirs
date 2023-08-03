@@ -1,4 +1,4 @@
-use crate::crypto::{read_decrypted, save_encrypted};
+use crate::crypto::{read_decrypted, save_encrypted, CryptoError};
 use std::collections::hash_set::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -23,7 +23,7 @@ impl Config {
     }
 }
 
-pub fn gen_config(infile: &str, outfile: &str, passphrase: &str) -> std::io::Result<()> {
+pub fn gen_config(infile: &str, outfile: &str, passphrase: &str) -> Result<(), CryptoError> {
     let mut fd = BufReader::new(File::open(infile)?);
     let mut config = Config::new();
 
@@ -62,7 +62,7 @@ pub fn gen_config(infile: &str, outfile: &str, passphrase: &str) -> std::io::Res
     Ok(())
 }
 
-pub fn get_config(infile: &str, passphrase: &str) -> std::io::Result<Config> {
-    let config: Config = read_decrypted(infile, passphrase)?;
-    Ok(config)
+#[inline]
+pub fn get_config(infile: &str, passphrase: &str) -> Result<Config, CryptoError> {
+    read_decrypted(infile, passphrase)
 }

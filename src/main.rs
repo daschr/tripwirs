@@ -6,6 +6,7 @@ use config::{gen_config, get_config, Config};
 use tripwirs::*;
 
 use std::env;
+use std::process::exit;
 
 use std::io;
 
@@ -13,9 +14,9 @@ use std::io;
 fn print_help(progname: &str) {
     eprintln!("Usage: {} [command] args...]", progname);
     eprintln!(
-        r"    create_config [plain config input path] [config output path]
-    generate_db [config input path] [db output path]
-    compare_db [config input path] [db]"
+        r"\tcreate_config [plain config input path] [config output path]
+\tgenerate_db [config input path] [db output path]
+\tcompare_db [config input path] [db]"
     );
 }
 
@@ -37,36 +38,50 @@ fn get_passphrase() -> String {
     }
 }
 
-fn main() -> std::io::Result<()> {
+fn blame<T, E: std::fmt::Debug>(r: Result<T, E>, s: &str) -> T {
+    match r {
+        Err(e) => {
+            eprintln!("{}: {:?}", s, e);
+            exit(1);
+        }
+        Ok(v) => v,
+    }
+}
+
+fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         print_help(&args[0]);
-        return Ok(());
+        return;
     }
 
     match args[1].as_str() {
         "create_config" => {
-            gen_config(&args[2], &args[3], &get_passphrase())?;
+            blame(
+                gen_config(&args[2], &args[3], &get_passphrase()),
+                "Could not generate config",
+            );
         }
         "generate_db" => {
             let p = get_passphrase();
-            let conf: Config = get_config(&args[2], &p)?;
-            gen_db(&conf, &args[3], &p)?;
+            let conf: Config = blame(get_config(&args[2], &p), "Could not get config");
+            blame(gen_db(&conf, &args[3], &p), "Could not create database");
         }
         "compare_db" => {
             let p = get_passphrase();
-            let conf: Config = get_config(&args[2], &p)?;
-            compare_db(&conf, &args[3], &p)?;
+            let conf: Config = blame(get_config(&args[2], &p), "Could not get config");
+            blame(
+                compare_db(&conf, &args[3], &p),
+                "Could not compare database",
+            );
         }
         "show_db" => {
             let p = get_passphrase();
-            print_db(&args[2], &p)?;
+            blame(print_db(&args[2], &p), "Could not show database");
         }
         _ => {
             print_help(&args[0]);
-            std::process::exit(1);
+            exit(1);
         }
     }
-
-    Ok(())
 }

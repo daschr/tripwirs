@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use xxhash_rust::xxh3::Xxh3;
 
 use crate::config::*;
-use crate::crypto::{read_decrypted, save_encrypted};
+use crate::crypto::{read_decrypted, save_encrypted, CryptoError};
 
 fn get_filehash(file: &str) -> std::io::Result<u64> {
     let mut fd = File::open(file)?;
@@ -40,7 +40,6 @@ fn scan_path(
     root_path: &str,
     db: &mut HashMap<String, NodeType>,
 ) -> std::io::Result<()> {
-    println!("root_path: {root_path}");
     let mut pathstack: Vec<PathBuf> = Vec::new();
     pathstack.push(PathBuf::from(root_path));
 
@@ -95,7 +94,7 @@ fn scan_path(
     Ok(())
 }
 
-pub fn gen_db(config: &Config, outfile: &str, passphrase: &str) -> std::io::Result<()> {
+pub fn gen_db(config: &Config, outfile: &str, passphrase: &str) -> Result<(), CryptoError> {
     let mut db: HashMap<String, NodeType> = HashMap::new();
 
     for root_path in &config.scans {
@@ -191,7 +190,7 @@ fn compare_path(
     Ok(())
 }
 
-pub fn compare_db(config: &Config, dbfile: &str, passphrase: &str) -> std::io::Result<()> {
+pub fn compare_db(config: &Config, dbfile: &str, passphrase: &str) -> Result<(), CryptoError> {
     let mut db: HashMap<String, NodeType> = read_decrypted(dbfile, passphrase)?;
 
     for root_path in &config.scans {
@@ -209,7 +208,7 @@ pub fn compare_db(config: &Config, dbfile: &str, passphrase: &str) -> std::io::R
     Ok(())
 }
 
-pub fn print_db(dbfile: &str, passphrase: &str) -> std::io::Result<()> {
+pub fn print_db(dbfile: &str, passphrase: &str) -> Result<(), CryptoError> {
     let db: HashMap<String, NodeType> = read_decrypted(dbfile, passphrase)?;
 
     for (path, _) in db.iter() {
