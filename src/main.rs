@@ -14,7 +14,7 @@ use std::io;
 fn print_help(progname: &str) {
     eprintln!("Usage: {} [command] args...]", progname);
     eprintln!(
-        r"\tcreate_config [plain config input path] [config output path]
+        "\tcreate_config [plain config input path] [config output path]
 \tgenerate_db [config input path] [db output path]
 \tcompare_db [config input path] [db]"
     );
