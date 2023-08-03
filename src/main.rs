@@ -1,5 +1,8 @@
+mod config;
+mod crypto;
 mod tripwirs;
 
+use config::{gen_config, get_config, Config};
 use tripwirs::*;
 
 use std::env;
