@@ -8,11 +8,11 @@ use tripwirs::*;
 use std::env;
 use std::process::exit;
 
-use std::io;
+use std::io::{self, Write};
 
 #[inline]
 fn print_help(progname: &str) {
-    eprintln!("Usage: {} [command] args...]", progname);
+    eprintln!("Usage: {} [command] [args...]\n", progname);
     eprintln!(
         "\tcreate_config [plain config input path] [config output path]
 \tgenerate_db [config input path] [db output path]
@@ -23,6 +23,8 @@ fn print_help(progname: &str) {
 #[inline]
 fn get_passphrase() -> String {
     let mut passphrase = String::new();
+    print!("Passphrase: ");
+    io::stdout().flush().ok();
 
     match io::stdin().read_line(&mut passphrase) {
         Ok(_) => {

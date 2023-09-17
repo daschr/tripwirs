@@ -31,7 +31,7 @@ pub fn gen_config(infile: &str, outfile: &str, passphrase: &str) -> Result<(), C
     let mut current_type: ActionType = ActionType::Scan;
 
     while fd.read_line(&mut line)? != 0 {
-        if line.trim_start().starts_with("#") || line.trim().len() == 0 {
+        if line.trim_start().starts_with('#') || line.trim().is_empty() {
             line.clear();
             continue;
         }
@@ -45,12 +45,12 @@ pub fn gen_config(infile: &str, outfile: &str, passphrase: &str) -> Result<(), C
             }
             _ => match &current_type {
                 ActionType::Scan => {
-                    config.scans.push(String::from(line.trim_end_matches("\n")));
+                    config.scans.push(String::from(line.trim_end_matches('\n')));
                 }
                 ActionType::Ignore => {
                     config
                         .ignores
-                        .insert(String::from(line.trim_end_matches("\n")));
+                        .insert(String::from(line.trim_end_matches('\n')));
                 }
             },
         }

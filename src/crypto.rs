@@ -2,60 +2,58 @@ use std::fs::File;
 use std::io::{Read, Write};
 
 use ring::aead::{
-    Aad, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, AES_256_GCM,
+    Aad, Algorithm, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey,
+    CHACHA20_POLY1305,
 };
 
 struct FixedNonceSequence {
-    first: u64,
-    second: u32,
+    counter: u128,
 }
 
 impl FixedNonceSequence {
     fn new() -> Self {
-        Self {
-            first: 0,
-            second: 0,
-        }
+        Self { counter: 0 }
     }
 }
 
 impl NonceSequence for FixedNonceSequence {
     fn advance(&mut self) -> Result<Nonce, ring::error::Unspecified> {
-        self.first += 1;
-        if self.first == 0u64 {
-            self.second += 1;
+        self.counter += 1;
+
+        if self.counter > ((1u128 << 96) - 1) {
+            self.counter = 1;
         }
 
         let mut buf = [0u8; 12];
-        for (i, x) in self.first.to_le_bytes().into_iter().enumerate() {
+        for (i, x) in self.counter.to_le_bytes().into_iter().enumerate() {
+            if i == 12 {
+                break;
+            }
             buf[i] = x;
-        }
-
-        for (i, x) in self.second.to_le_bytes().into_iter().enumerate() {
-            buf[i + 8] = x;
         }
 
         Ok(Nonce::assume_unique_for_key(buf))
     }
 }
 
-fn get_aes_256_compatible_passphrase(passphrase: &str) -> Vec<u8> {
+fn get_compatible_passphrase(algo: &Algorithm, passphrase: &str) -> Vec<u8> {
     let mut s: Vec<u8> = Vec::from(passphrase.as_bytes());
     let orig_len = s.len();
-    if orig_len < AES_256_GCM.key_len() {
-        while s.len() != AES_256_GCM.key_len() {
+
+    if orig_len < algo.key_len() {
+        while s.len() != algo.key_len() {
             let nl = {
-                if s.len() + orig_len < AES_256_GCM.key_len() {
+                if s.len() + orig_len < algo.key_len() {
                     orig_len
                 } else {
-                    AES_256_GCM.key_len() - s.len()
+                    algo.key_len() - s.len()
                 }
             };
 
             s.extend_from_within(0..nl);
         }
     } else {
-        s.truncate(AES_256_GCM.key_len());
+        s.truncate(algo.key_len());
     }
 
     s
@@ -96,10 +94,10 @@ pub fn save_encrypted<T: bincode::Encode>(
 ) -> Result<(), CryptoError> {
     let mut data = bincode::encode_to_vec(obj, bincode::config::standard())?;
 
-    let comp_passphrase = get_aes_256_compatible_passphrase(passphrase);
+    let comp_passphrase = get_compatible_passphrase(&CHACHA20_POLY1305, passphrase);
 
     let seq = FixedNonceSequence::new();
-    let unbound_key = UnboundKey::new(&AES_256_GCM, &comp_passphrase)
+    let unbound_key = UnboundKey::new(&CHACHA20_POLY1305, &comp_passphrase)
         .map_err(|_| CryptoError::CouldNotCreateKey)?;
     let mut sealing_key = SealingKey::new(unbound_key, seq);
 
@@ -115,9 +113,9 @@ pub fn read_decrypted<T: bincode::Decode>(
     infile: &str,
     passphrase: &str,
 ) -> Result<T, CryptoError> {
-    let comp_passphrase = get_aes_256_compatible_passphrase(passphrase);
+    let comp_passphrase = get_compatible_passphrase(&CHACHA20_POLY1305, passphrase);
     let seq = FixedNonceSequence::new();
-    let unbound_key = UnboundKey::new(&AES_256_GCM, &comp_passphrase)
+    let unbound_key = UnboundKey::new(&CHACHA20_POLY1305, &comp_passphrase)
         .map_err(|_| CryptoError::CouldNotCreateKey)?;
     let mut opening_key = OpeningKey::new(unbound_key, seq);
 

@@ -43,8 +43,7 @@ fn scan_path(
     let mut pathstack: Vec<PathBuf> = Vec::new();
     pathstack.push(PathBuf::from(root_path));
 
-    while pathstack.len() != 0 {
-        let e = pathstack.pop().unwrap();
+    while let Some(e) = pathstack.pop() {
         let path: &Path = e.as_path();
         let e_str: &str = e.to_str().unwrap();
 
@@ -115,8 +114,7 @@ fn compare_path(
     let mut pathstack: Vec<PathBuf> = Vec::new();
     pathstack.push(PathBuf::from(root_path));
 
-    while pathstack.len() != 0 {
-        let e = pathstack.pop().unwrap();
+    while let Some(e) = pathstack.pop() {
         let path: &Path = e.as_path();
         let e_str: &str = e.to_str().unwrap();
 
