@@ -2,16 +2,18 @@ use core::hash::Hasher;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use xxhash_rust::xxh3::Xxh3;
 
 use crate::config::*;
 use crate::crypto::{read_decrypted, save_encrypted, CryptoError};
 
-fn get_filehash(file: &str) -> std::io::Result<u64> {
+#[inline]
+fn get_filehash(hasher: &mut Xxh3, file: &PathBuf) -> std::io::Result<u64> {
+    hasher.reset();
+
     let mut fd = File::open(file)?;
     let mut buf = [0u8; 1024];
-    let mut hasher = Xxh3::new();
 
     loop {
         let read_bytes = fd.read(&mut buf)?;
@@ -38,34 +40,34 @@ enum NodeType {
 fn scan_path(
     config: &Config,
     root_path: &str,
-    db: &mut HashMap<String, NodeType>,
+    db: &mut HashMap<PathBuf, NodeType>,
 ) -> std::io::Result<()> {
+    let mut hasher = Xxh3::with_secret(config.secret.clone());
+
     let mut pathstack: Vec<PathBuf> = Vec::new();
     pathstack.push(PathBuf::from(root_path));
 
-    while let Some(e) = pathstack.pop() {
-        let path: &Path = e.as_path();
-        let e_str: &str = e.to_str().unwrap();
-
-        if config.ignores.contains(e_str) {
-            println!("Skipping \"{}\"", e_str);
+    while let Some(path) = pathstack.pop() {
+        let pathname = path.display();
+        if config.ignores.contains(path.as_path()) {
+            println!("Skipping \"{}\"", pathname);
             continue;
         }
 
         if path.is_symlink() {
-            println!("[symlink] {}", e_str);
-            db.insert(String::from(e_str), NodeType::L);
+            println!("[symlink] {}", pathname);
+            db.insert(path, NodeType::L);
             continue;
         }
 
         if path.is_file() {
-            println!("[file] {}", e_str);
-            match get_filehash(e_str) {
+            println!("[file] {}", pathname);
+            match get_filehash(&mut hasher, &path) {
                 Ok(hash) => {
-                    db.insert(String::from(e_str), NodeType::F(hash));
+                    db.insert(path, NodeType::F(hash));
                 }
                 Err(error) => {
-                    eprintln!("Exception on: \"{}\" [{:?}]", e_str, error);
+                    eprintln!("Exception on: \"{}\" [{}]", pathname, error);
                 }
             }
             continue;
@@ -85,8 +87,8 @@ fn scan_path(
         }
 
         if n_elems == 0 {
-            db.insert(String::from(e_str), NodeType::D);
-            println!("[dir] {:?}", &e);
+            println!("[dir] {}", pathname);
+            db.insert(path, NodeType::D);
         }
     }
 
@@ -94,7 +96,7 @@ fn scan_path(
 }
 
 pub fn gen_db(config: &Config, outfile: &str, passphrase: &str) -> Result<(), CryptoError> {
-    let mut db: HashMap<String, NodeType> = HashMap::new();
+    let mut db: HashMap<PathBuf, NodeType> = HashMap::new();
 
     for root_path in &config.scans {
         scan_path(config, root_path, &mut db)?;
@@ -109,55 +111,56 @@ pub fn gen_db(config: &Config, outfile: &str, passphrase: &str) -> Result<(), Cr
 fn compare_path(
     config: &Config,
     root_path: &str,
-    db: &mut HashMap<String, NodeType>,
+    db: &mut HashMap<PathBuf, NodeType>,
 ) -> std::io::Result<()> {
+    let mut hasher = Xxh3::with_secret(config.secret.clone());
+
     let mut pathstack: Vec<PathBuf> = Vec::new();
     pathstack.push(PathBuf::from(root_path));
 
-    while let Some(e) = pathstack.pop() {
-        let path: &Path = e.as_path();
-        let e_str: &str = e.to_str().unwrap();
+    while let Some(path) = pathstack.pop() {
+        let pathname = path.display();
 
-        if config.ignores.contains(e_str) {
-            println!("Skipping \"{}\"", e_str);
+        if config.ignores.contains(path.as_path()) {
+            println!("Skipping \"{}\"", pathname);
             continue;
         }
 
         if path.is_symlink() {
-            match db.remove(e_str) {
+            match db.remove(path.as_path()) {
                 Some(NodeType::F(hash)) => {
                     eprintln!(
                         "[{}] SYMLINK WAS PREVIOUSLY A FILE (0x{:016x})",
-                        e_str, hash
+                        pathname, hash
                     )
                 }
                 Some(NodeType::D) => {
-                    eprintln!("[{}] SYMLINK WAS PREVIOUSLY A DIRECTORY", e_str);
+                    eprintln!("[{}] SYMLINK WAS PREVIOUSLY A DIRECTORY", pathname);
                 }
                 Some(NodeType::L) => (),
-                None => eprintln!("[{}] NEW SYMLINK", e_str),
+                None => eprintln!("[{}] NEW SYMLINK", pathname),
             }
             continue;
         }
 
         if path.is_file() {
-            match db.remove(e_str) {
+            match db.remove(path.as_path()) {
                 Some(NodeType::F(old_hash)) => {
-                    let new_hash = get_filehash(e_str)?;
+                    let new_hash = get_filehash(&mut hasher, &path)?;
                     if old_hash != new_hash {
                         eprintln!(
                             "[{}] HASH CHANGED (old: 0x{:016x}|new: 0x{:016x})",
-                            e_str, old_hash, new_hash
+                            pathname, old_hash, new_hash
                         )
                     }
                 }
                 Some(NodeType::D) => {
-                    eprintln!("[{}] FILE WAS PREVIOUSLY A DIRECTORY", e_str);
+                    eprintln!("[{}] FILE WAS PREVIOUSLY A DIRECTORY", pathname);
                 }
                 Some(NodeType::L) => {
-                    eprintln!("[{}] FILE WAS PREVIOUSLY A SYMLINK", e_str);
+                    eprintln!("[{}] FILE WAS PREVIOUSLY A SYMLINK", pathname);
                 }
-                None => eprintln!("[{}] NEW FILE", e_str),
+                None => eprintln!("[{}] NEW FILE", pathname),
             }
             continue;
         }
@@ -176,11 +179,11 @@ fn compare_path(
         }
 
         if n_elems == 0 {
-            match db.remove(e_str) {
-                Some(NodeType::F(_)) => eprintln!("[{}] FILE IS NOW A DIRECTORY", e_str),
-                Some(NodeType::L) => eprintln!("[{}] SYMLINK IS NOW A DIRECTORY", e_str),
+            match db.remove(path.as_path()) {
+                Some(NodeType::F(_)) => eprintln!("[{}] FILE IS NOW A DIRECTORY", pathname),
+                Some(NodeType::L) => eprintln!("[{}] SYMLINK IS NOW A DIRECTORY", pathname),
                 Some(NodeType::D) => (),
-                None => eprintln!("[{}] NEW DIRECTORY", e_str),
+                None => eprintln!("[{}] NEW DIRECTORY", pathname),
             }
         }
     }
@@ -189,13 +192,14 @@ fn compare_path(
 }
 
 pub fn compare_db(config: &Config, dbfile: &str, passphrase: &str) -> Result<(), CryptoError> {
-    let mut db: HashMap<String, NodeType> = read_decrypted(dbfile, passphrase)?;
+    let mut db: HashMap<PathBuf, NodeType> = read_decrypted(dbfile, passphrase)?;
 
     for root_path in &config.scans {
         compare_path(config, root_path, &mut db)?;
     }
 
     for (k, v) in db.iter() {
+        let k = k.display();
         match v {
             NodeType::F(hash) => eprintln!("[{k}] FILE WITH HASH 0x{hash:016x} IS REMOVED"),
             NodeType::D => eprintln!("[{k}] DIRECTORY IS REMOVED"),

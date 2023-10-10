@@ -1,7 +1,9 @@
 use crate::crypto::{read_decrypted, save_encrypted, CryptoError};
+use rand::prelude::*;
 use std::collections::hash_set::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 
 pub enum ActionType {
     Scan,
@@ -10,16 +12,28 @@ pub enum ActionType {
 
 #[derive(bincode::Encode, bincode::Decode)]
 pub struct Config {
+    pub secret: [u8; 192],
     pub scans: Vec<String>,
-    pub ignores: HashSet<String>,
+    pub ignores: HashSet<PathBuf>,
 }
 
 impl Config {
     pub fn new() -> Self {
-        Self {
+        let mut c = Self {
+            secret: [0u8; 192],
             scans: Vec::new(),
             ignores: HashSet::new(),
-        }
+        };
+
+        c.gen_new_secret();
+
+        c
+    }
+
+    pub fn gen_new_secret(&mut self) {
+        let mut rng = rand::thread_rng();
+        rng.fill(&mut self.secret[0..128]);
+        rng.fill(&mut self.secret[128..192]);
     }
 }
 
@@ -50,7 +64,7 @@ pub fn gen_config(infile: &str, outfile: &str, passphrase: &str) -> Result<(), C
                 ActionType::Ignore => {
                     config
                         .ignores
-                        .insert(String::from(line.trim_end_matches('\n')));
+                        .insert(PathBuf::from(line.trim_end_matches('\n')));
                 }
             },
         }

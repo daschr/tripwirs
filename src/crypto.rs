@@ -1,27 +1,28 @@
 use std::fs::File;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 
 use ring::aead::{
     Aad, Algorithm, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey,
     CHACHA20_POLY1305,
 };
 
-struct FixedNonceSequence {
-    counter: u128,
+struct FixedNonceSequence<'a> {
+    counter: &'a mut u128,
 }
 
-impl FixedNonceSequence {
-    fn new() -> Self {
-        Self { counter: 0 }
+impl<'a> FixedNonceSequence<'a> {
+    fn new(counter: &'a mut u128) -> Self {
+        Self { counter }
     }
 }
 
-impl NonceSequence for FixedNonceSequence {
+impl<'a> NonceSequence for FixedNonceSequence<'a> {
     fn advance(&mut self) -> Result<Nonce, ring::error::Unspecified> {
-        self.counter += 1;
+        *self.counter += 1;
 
-        if self.counter > ((1u128 << 96) - 1) {
-            self.counter = 1;
+        if *self.counter > ((1u128 << 96) - 1) {
+            *self.counter = 1;
         }
 
         let mut buf = [0u8; 12];
@@ -64,6 +65,8 @@ pub enum CryptoError {
     WrongPassphrase,
     CouldNotCreateKey,
     CouldNotEncrypt,
+    EncryptedDataTooShort,
+    CannotGetNonceFromExistingFile,
     EncodeError(bincode::error::EncodeError),
     DecodeError(bincode::error::DecodeError),
     IoError(std::io::Error),
@@ -87,6 +90,48 @@ impl From<bincode::error::DecodeError> for CryptoError {
     }
 }
 
+fn get_next_nonce_from_file<P: Into<PathBuf>>(
+    path: P,
+    passphrase: &str,
+) -> Result<u128, CryptoError> {
+    let path: PathBuf = path.into();
+
+    if !path.exists() {
+        return Ok(0);
+    }
+
+    let mut fd = File::open(path)?;
+
+    if fd.metadata()?.len() < 16 {
+        return Err(CryptoError::CannotGetNonceFromExistingFile);
+    }
+
+    let mut data = Vec::new();
+    fd.read_to_end(&mut data)?;
+
+    let mut nonce: u128 = {
+        let mut b = [0u8; 16];
+        for i in (0..16).rev() {
+            b[i] = data.pop().unwrap();
+        }
+
+        u128::from_be_bytes(b)
+    };
+
+    let seq = FixedNonceSequence::new(&mut nonce);
+
+    let comp_passphrase = get_compatible_passphrase(&CHACHA20_POLY1305, passphrase);
+    let unbound_key = UnboundKey::new(&CHACHA20_POLY1305, &comp_passphrase)
+        .map_err(|_| CryptoError::CouldNotCreateKey)?;
+    let mut opening_key = OpeningKey::new(unbound_key, seq);
+
+    opening_key
+        .open_in_place(Aad::empty(), &mut data)
+        .map_err(|_| CryptoError::CannotGetNonceFromExistingFile)?;
+
+    Ok(nonce + 1)
+}
+
 pub fn save_encrypted<T: bincode::Encode>(
     obj: T,
     outfile: &str,
@@ -96,16 +141,24 @@ pub fn save_encrypted<T: bincode::Encode>(
 
     let comp_passphrase = get_compatible_passphrase(&CHACHA20_POLY1305, passphrase);
 
-    let seq = FixedNonceSequence::new();
     let unbound_key = UnboundKey::new(&CHACHA20_POLY1305, &comp_passphrase)
         .map_err(|_| CryptoError::CouldNotCreateKey)?;
+
+    let mut nonce: u128 = get_next_nonce_from_file(outfile, passphrase)?;
+    let first_nonce = nonce;
+
+    let seq = FixedNonceSequence::new(&mut nonce);
+
     let mut sealing_key = SealingKey::new(unbound_key, seq);
 
     sealing_key
         .seal_in_place_append_tag(Aad::empty(), &mut data)
         .map_err(|_| CryptoError::CouldNotEncrypt)?;
 
-    File::create(outfile)?.write_all(&data)?;
+    let mut fd = File::create(outfile)?;
+    fd.write_all(&data)?;
+    fd.write(&first_nonce.to_be_bytes())?;
+
     Ok(())
 }
 
@@ -113,15 +166,28 @@ pub fn read_decrypted<T: bincode::Decode>(
     infile: &str,
     passphrase: &str,
 ) -> Result<T, CryptoError> {
-    let comp_passphrase = get_compatible_passphrase(&CHACHA20_POLY1305, passphrase);
-    let seq = FixedNonceSequence::new();
-    let unbound_key = UnboundKey::new(&CHACHA20_POLY1305, &comp_passphrase)
-        .map_err(|_| CryptoError::CouldNotCreateKey)?;
-    let mut opening_key = OpeningKey::new(unbound_key, seq);
-
     let mut data: Vec<u8> = Vec::new();
 
     File::open(infile)?.read_to_end(&mut data)?;
+
+    if data.len() < 16 {
+        return Err(CryptoError::EncryptedDataTooShort);
+    }
+
+    let mut nonce: u128 = {
+        let mut b = [0u8; 16];
+        for i in (0..16).rev() {
+            b[i] = data.pop().unwrap();
+        }
+        u128::from_be_bytes(b)
+    };
+    let seq = FixedNonceSequence::new(&mut nonce);
+
+    let comp_passphrase = get_compatible_passphrase(&CHACHA20_POLY1305, passphrase);
+
+    let unbound_key = UnboundKey::new(&CHACHA20_POLY1305, &comp_passphrase)
+        .map_err(|_| CryptoError::CouldNotCreateKey)?;
+    let mut opening_key = OpeningKey::new(unbound_key, seq);
 
     opening_key
         .open_in_place(Aad::empty(), &mut data)
